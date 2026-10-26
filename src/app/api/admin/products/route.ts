@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { del, put } from "@vercel/blob";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { isAdminAuthenticated } from "@/lib/admin-session";
@@ -172,7 +173,7 @@ export async function POST(request: Request) {
   }
 
   let totalSize = 0;
-  const uploads: { filename: string; url: string; alt: string; bytes: Buffer }[] = [];
+  const uploads: { filename: string; url: string; alt: string; bytes: Buffer; contentType: string }[] = [];
   for (const file of files) {
     totalSize += file.size;
     const imageType = allowedTypes.get(file.type);
@@ -182,11 +183,12 @@ export async function POST(request: Request) {
     const bytes = Buffer.from(await file.arrayBuffer());
     if (!imageType.signature(bytes)) return NextResponse.json({ error: "محتوى أحد الملفات لا يطابق نوع الصورة." }, { status: 422 });
     const filename = `${randomUUID()}.${imageType.extension}`;
-    uploads.push({ filename, url: `/uploads/products/${filename}`, alt: parsed.data.nameAr, bytes });
+    uploads.push({ filename, url: `/uploads/products/${filename}`, alt: parsed.data.nameAr, bytes, contentType: file.type });
   }
   if (totalSize > 25 * 1024 * 1024) return NextResponse.json({ error: "الحجم الإجمالي للصور يتجاوز 25 ميغابايت." }, { status: 422 });
 
   const writtenFiles: string[] = [];
+  const storedBlobUrls: string[] = [];
   const uploadDirectory = path.join(process.cwd(), "public", "uploads", "products");
   const category = categories[parsed.data.category];
   const slugBase = parsed.data.nameFr.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "product";
@@ -200,13 +202,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "لا يمكن أن يقل المخزون عن الكمية المحجوزة للطلبات." }, { status: 422 });
   }
 
+  const useBlobStorage = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  if (files.length && process.env.VERCEL && !useBlobStorage) {
+    return NextResponse.json({ error: "لم يتم إعداد تخزين صور المنتجات. اربطي Vercel Blob بالتطبيق ثم أعيدي المحاولة." }, { status: 503 });
+  }
+
+  let savingImages = false;
   try {
-    await mkdir(uploadDirectory, { recursive: true });
-    for (const upload of uploads) {
-      const filePath = path.join(uploadDirectory, upload.filename);
-      await writeFile(filePath, upload.bytes, { flag: "wx" });
-      writtenFiles.push(filePath);
+    if (uploads.length && !useBlobStorage) {
+      savingImages = true;
+      await mkdir(uploadDirectory, { recursive: true });
     }
+    for (const upload of uploads) {
+      if (useBlobStorage) {
+        savingImages = true;
+        const blob = await put(upload.filename, upload.bytes, {
+          access: "public",
+          contentType: upload.contentType,
+        });
+        upload.url = blob.url;
+        storedBlobUrls.push(blob.url);
+      } else {
+        const filePath = path.join(uploadDirectory, upload.filename);
+        await writeFile(filePath, upload.bytes, { flag: "wx" });
+        writtenFiles.push(filePath);
+      }
+    }
+    savingImages = false;
 
     const product = await prisma.$transaction(async (tx) => {
       const savedCategory = await tx.category.upsert({
@@ -291,8 +313,21 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ product: serializeProduct(product) }, { status: existingProduct ? 200 : 201 });
   } catch (error) {
-    await Promise.all(writtenFiles.map((filePath) => unlink(filePath).catch(() => undefined)));
+    const cleanupResults = await Promise.allSettled([
+      ...writtenFiles.map((filePath) => unlink(filePath)),
+      ...(storedBlobUrls.length ? [del(storedBlobUrls)] : []),
+    ]);
+    cleanupResults.forEach((result) => {
+      if (result.status === "rejected") console.error("Product image cleanup failed", result.reason);
+    });
     console.error("Product save failed", error);
+    if (savingImages) {
+      return NextResponse.json({
+        error: useBlobStorage
+          ? "تعذر رفع صور المنتج إلى التخزين السحابي. تحققي من إعدادات Vercel Blob ثم أعيدي المحاولة."
+          : "تعذر حفظ صورة المنتج على الخادم المحلي.",
+      }, { status: useBlobStorage ? 502 : 500 });
+    }
     return NextResponse.json({ error: "تعذر حفظ المنتج. تحققي من البيانات ثم أعيدي المحاولة." }, { status: 500 });
   }
 }
