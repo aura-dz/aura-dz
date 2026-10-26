@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+coverage/
+.turbo/
+/public/uploads/
+.vscode/settings.json
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*

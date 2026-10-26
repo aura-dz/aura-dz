@@ -1,0 +1,551 @@
+// ============================================================
+//  متجر فساتين - الجزائر | Prisma Schema (PostgreSQL)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------
+//  ENUMS
+// ------------------------------------------------------------
+
+enum OrderStatus {
+  PENDING          // طلب جديد بانتظار التأكيد
+  CONFIRMED        // أكّده الزبون (واتساب/موقع) أو الإدارة
+  PROCESSING       // قيد التجهيز
+  SHIPPED          // سُلّم لشركة التوصيل
+  OUT_FOR_DELIVERY // خرج للتسليم
+  DELIVERED        // تم التسليم
+  CANCELLED        // ملغى
+  RETURNED         // مُرجع
+  FAILED_DELIVERY  // فشل التسليم
+}
+
+enum ConfirmationChannel {
+  WHATSAPP
+  WEBSITE
+  PHONE_CALL
+  ADMIN
+}
+
+enum DeliveryType {
+  HOME   // توصيل للمنزل
+  DESK   // توصيل لمكتب شركة التوصيل (Stop Desk)
+}
+
+enum PaymentMethod {
+  COD    // الدفع عند الاستلام
+  CIB    // الدفع الإلكتروني (SATIM) - مرحلة لاحقة
+  EDAHABIA
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+enum ShipmentStatus {
+  CREATED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNING
+  RETURNED
+  CANCELLED
+}
+
+enum DeliveryProviderCode {
+  YALIDINE
+  ZR_EXPRESS
+  MAYSTRO
+  ECOTRACK   // منصة تضم Procolis وغيرها
+  OTHER
+}
+
+enum MessageDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum MessageChannel {
+  WHATSAPP
+  MESSENGER
+  INSTAGRAM
+  SMS
+}
+
+enum AdminRole {
+  OWNER
+  MANAGER
+  CONFIRMER   // موظف تأكيد الطلبات
+  VIEWER
+}
+
+enum MetaEventName {
+  PageView
+  ViewContent
+  AddToCart
+  InitiateCheckout
+  Lead
+  Purchase
+}
+
+enum StockMovementType {
+  RESERVE     // حجز عند الطلب
+  RELEASE     // تحرير عند الإلغاء
+  SALE        // خروج نهائي عند التسليم
+  RETURN      // إرجاع للمخزون
+  ADJUSTMENT  // تعديل يدوي
+}
+
+// ------------------------------------------------------------
+//  CATALOG
+// ------------------------------------------------------------
+
+model Category {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  nameAr      String
+  nameFr      String
+  descAr      String?
+  descFr      String?
+  imageUrl    String?
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([parentId])
+}
+
+model Product {
+  id            String    @id @default(cuid())
+  slug          String    @unique
+  nameAr        String
+  nameFr        String
+  descAr        String?   @db.Text
+  descFr        String?   @db.Text
+  fabric        String?   // القماش
+  occasion      String[]  // سهرة، خطوبة، عرس، يومي...
+  basePrice     Int       // بالدينار الجزائري (DZD)
+  comparePrice  Int?      // السعر قبل التخفيض
+  costPrice     Int?      // سعر التكلفة (لحساب الربح)
+  sku           String?   @unique
+  isActive      Boolean   @default(true)
+  isFeatured    Boolean   @default(false)
+  videoUrl      String?
+  metaTitleAr   String?
+  metaTitleFr   String?
+  metaDescAr    String?
+  metaDescFr    String?
+  categoryId    String
+  category      Category  @relation(fields: [categoryId], references: [id])
+  images        ProductImage[]
+  variants      Variant[]
+  reviews       Review[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([categoryId])
+  @@index([isActive, isFeatured])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  colorName String?  // لربط الصورة بلون معين
+  sortOrder Int      @default(0)
+
+  @@index([productId])
+}
+
+model Variant {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size        String   // S, M, L, 38, 40...
+  colorName   String
+  colorHex    String?
+  sku         String?  @unique
+  priceOverride Int?   // إن اختلف السعر عن السعر الأساسي
+  stock       Int      @default(0)
+  reserved    Int      @default(0)
+  isActive    Boolean  @default(true)
+  orderItems  OrderItem[]
+  movements   StockMovement[]
+
+  @@unique([productId, size, colorName])
+  @@index([productId])
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  variantId String
+  variant   Variant           @relation(fields: [variantId], references: [id])
+  type      StockMovementType
+  quantity  Int
+  orderId   String?
+  note      String?
+  createdAt DateTime          @default(now())
+
+  @@index([variantId])
+  @@index([orderId])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  authorName String
+  rating     Int      // 1..5
+  comment    String?  @db.Text
+  photoUrls  String[]
+  isApproved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([productId, isApproved])
+}
+
+// ------------------------------------------------------------
+//  GEOGRAPHY & DELIVERY RATES
+// ------------------------------------------------------------
+
+model Wilaya {
+  id        Int       @id            // رقم الولاية الرسمي 1..58
+  nameAr    String
+  nameFr    String
+  isActive  Boolean   @default(true)
+  communes  Commune[]
+  rates     DeliveryRate[]
+  orders    Order[]
+  providerCodes ProviderWilayaCode[]
+}
+
+model Commune {
+  id        Int      @id @default(autoincrement())
+  wilayaId  Int
+  wilaya    Wilaya   @relation(fields: [wilayaId], references: [id])
+  nameAr    String
+  nameFr    String
+  postCode  String?
+  orders    Order[]
+  providerCodes ProviderCommuneCode[]
+
+  @@index([wilayaId])
+}
+
+// ترميز الولايات/البلديات يختلف بين شركات التوصيل
+model ProviderWilayaCode {
+  id        Int                  @id @default(autoincrement())
+  provider  DeliveryProviderCode
+  wilayaId  Int
+  wilaya    Wilaya               @relation(fields: [wilayaId], references: [id])
+  code      String
+
+  @@unique([provider, wilayaId])
+}
+
+model ProviderCommuneCode {
+  id         Int                  @id @default(autoincrement())
+  provider   DeliveryProviderCode
+  communeId  Int
+  commune    Commune              @relation(fields: [communeId], references: [id])
+  code       String
+  hasDesk    Boolean              @default(false) // يوجد مكتب توصيل
+
+  @@unique([provider, communeId])
+}
+
+model DeliveryRate {
+  id         Int                  @id @default(autoincrement())
+  provider   DeliveryProviderCode
+  wilayaId   Int
+  wilaya     Wilaya               @relation(fields: [wilayaId], references: [id])
+  type       DeliveryType
+  price      Int                  // سعر يُعرض للزبون (DZD)
+  providerCost Int?               // ما تدفعه فعلياً للشركة
+  estimatedDays Int?
+  isActive   Boolean              @default(true)
+
+  @@unique([provider, wilayaId, type])
+}
+
+// ------------------------------------------------------------
+//  CUSTOMERS & ORDERS
+// ------------------------------------------------------------
+
+model Customer {
+  id            String   @id @default(cuid())
+  fullName      String
+  phone         String   @unique       // صيغة موحدة E.164: +213...
+  whatsappId    String?                // wa_id من واتساب
+  messengerPsid String?                // PSID من Messenger
+  email         String?
+  isBlacklisted Boolean  @default(false)
+  blacklistReason String?
+  totalOrders   Int      @default(0)
+  deliveredOrders Int    @default(0)
+  returnedOrders  Int    @default(0)
+  orders        Order[]
+  messages      MessageLog[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  number          String        @unique      // رقم مقروء مثل RB-100245
+  status          OrderStatus   @default(PENDING)
+
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+
+  // عنوان التسليم (نسخة ثابتة وقت الطلب)
+  fullName        String
+  phone           String
+  wilayaId        Int
+  wilaya          Wilaya        @relation(fields: [wilayaId], references: [id])
+  communeId       Int?
+  commune         Commune?      @relation(fields: [communeId], references: [id])
+  address         String?
+  deliveryType    DeliveryType  @default(HOME)
+  customerNote    String?
+
+  // المبالغ (DZD)
+  subtotal        Int
+  shippingFee     Int
+  discount        Int           @default(0)
+  total           Int
+
+  paymentMethod   PaymentMethod  @default(COD)
+  paymentStatus   PaymentStatus  @default(UNPAID)
+
+  // التأكيد
+  confirmToken        String   @unique @default(cuid()) // رمز فريد لرابط التأكيد
+  confirmTokenExpires DateTime?
+  confirmedAt         DateTime?
+  confirmedVia        ConfirmationChannel?
+  cancelledAt         DateTime?
+  cancelReason        String?
+  reminderSentAt      DateTime?
+
+  // التتبع التسويقي
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  utmContent      String?
+  fbclid          String?
+  fbp             String?   // cookie _fbp
+  fbc             String?   // cookie _fbc
+  clientIp        String?
+  userAgent       String?
+
+  items           OrderItem[]
+  shipment        Shipment?
+  messages        MessageLog[]
+  metaEvents      MetaEventLog[]
+  history         OrderStatusHistory[]
+  internalNotes   OrderNote[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([customerId])
+  @@index([phone])
+  @@index([wilayaId])
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     Variant  @relation(fields: [variantId], references: [id])
+  // نسخة ثابتة من بيانات المنتج وقت الطلب
+  productName String
+  size        String
+  colorName   String
+  unitPrice   Int
+  unitCost    Int?
+  quantity    Int
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+model OrderStatusHistory {
+  id         String      @id @default(cuid())
+  orderId    String
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  actor      String?     // system | admin:<id> | customer
+  note       String?
+  createdAt  DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+model OrderNote {
+  id          String    @id @default(cuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+  text        String    @db.Text
+  createdAt   DateTime  @default(now())
+
+  @@index([orderId])
+}
+
+// ------------------------------------------------------------
+//  SHIPPING
+// ------------------------------------------------------------
+
+model Shipment {
+  id             String               @id @default(cuid())
+  orderId        String               @unique
+  order          Order                @relation(fields: [orderId], references: [id])
+  provider       DeliveryProviderCode
+  trackingId     String?              @unique
+  providerRef    String?              // المعرف الداخلي لدى الشركة
+  status         ShipmentStatus       @default(CREATED)
+  labelUrl       String?
+  codAmount      Int                  // المبلغ المطلوب تحصيله
+  shippingCost   Int?
+  lastSyncAt     DateTime?
+  lastError      String?
+  rawPayload     Json?                // آخر استجابة من الشركة
+  events         ShipmentEvent[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([provider, status])
+}
+
+model ShipmentEvent {
+  id          String         @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status      ShipmentStatus
+  description String?
+  location    String?
+  occurredAt  DateTime
+  createdAt   DateTime       @default(now())
+
+  @@index([shipmentId])
+}
+
+model ProviderAccount {
+  id          String               @id @default(cuid())
+  provider    DeliveryProviderCode @unique
+  isActive    Boolean              @default(true)
+  // المفاتيح تُحفظ مشفّرة (أو في متغيرات البيئة)
+  credentials Json
+  settings    Json?
+  updatedAt   DateTime             @updatedAt
+}
+
+// ------------------------------------------------------------
+//  MESSAGING (WhatsApp / Messenger)
+// ------------------------------------------------------------
+
+model MessageLog {
+  id           String           @id @default(cuid())
+  channel      MessageChannel   @default(WHATSAPP)
+  direction    MessageDirection
+  status       MessageStatus    @default(QUEUED)
+  externalId   String?          @unique   // wamid من واتساب
+  templateName String?
+  body         String?          @db.Text
+  payload      Json?
+  error        String?
+  customerId   String?
+  customer     Customer?        @relation(fields: [customerId], references: [id])
+  orderId      String?
+  order        Order?           @relation(fields: [orderId], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@index([customerId])
+  @@index([orderId])
+  @@index([channel, direction, createdAt])
+}
+
+// ------------------------------------------------------------
+//  META (Facebook) EVENTS - Pixel & Conversions API
+// ------------------------------------------------------------
+
+model MetaEventLog {
+  id          String        @id @default(cuid())
+  eventId     String        @unique   // نفس event_id بين Pixel وCAPI لمنع التكرار
+  eventName   MetaEventName
+  orderId     String?
+  order       Order?        @relation(fields: [orderId], references: [id])
+  sentToCapi  Boolean       @default(false)
+  responseOk  Boolean?
+  response    Json?
+  createdAt   DateTime      @default(now())
+
+  @@index([orderId])
+  @@index([eventName, createdAt])
+}
+
+// ------------------------------------------------------------
+//  ADMIN & SETTINGS
+// ------------------------------------------------------------
+
+model AdminUser {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String
+  passwordHash String
+  role         AdminRole   @default(CONFIRMER)
+  isActive     Boolean     @default(true)
+  lastLoginAt  DateTime?
+  notes        OrderNote[]
+  createdAt    DateTime    @default(now())
+}
+
+model Setting {
+  key       String   @id   // مثل: store.name, whatsapp.reminder_hours
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  percentOff  Int?
+  amountOff   Int?
+  minSubtotal Int?
+  maxUses     Int?
+  usedCount   Int       @default(0)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  isActive    Boolean   @default(true)
+}

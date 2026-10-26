@@ -1,0 +1,38 @@
+{
+  "name": "robes-store",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "prisma:generate": "prisma generate --schema schema.prisma",
+    "prisma:validate": "prisma validate --schema schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.0.0",
+    "next-intl": "^4.3.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "prisma": "^6.19.0",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "@swc/core@1.16.20": true,
+    "prisma@6.19.3": true,
+    "unrs-resolver@1.12.2": true
+  }
+}
