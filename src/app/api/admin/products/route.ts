@@ -202,7 +202,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "لا يمكن أن يقل المخزون عن الكمية المحجوزة للطلبات." }, { status: 422 });
   }
 
-  const useBlobStorage = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  const useBlobStorage = Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+    (process.env.BLOB_STORE_ID && process.env.VERCEL_OIDC_TOKEN),
+  );
   if (files.length && process.env.VERCEL && !useBlobStorage) {
     return NextResponse.json({ error: "لم يتم إعداد تخزين صور المنتجات. اربطي Vercel Blob بالتطبيق ثم أعيدي المحاولة." }, { status: 503 });
   }
